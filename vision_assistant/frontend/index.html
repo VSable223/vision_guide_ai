@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Vision Assistant</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body {
+  margin:0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont;
+  background:#0f172a;
+  color:#e5e7eb;
+  display:flex;
+  height:100vh;
+}
+
+/* sidebar */
+aside {
+  width:260px;
+  background:#020617;
+  padding:16px;
+  border-right:1px solid #1e293b;
+}
+aside button {
+  width:100%;
+  margin-top:10px;
+  padding:10px;
+  background:#10b981;
+  border:none;
+  font-weight:600;
+  cursor:pointer;
+}
+
+/* main */
+main {
+  flex:1;
+  display:flex;
+  flex-direction:column;
+}
+
+header {
+  padding:16px;
+  border-bottom:1px solid #1e293b;
+  font-size:18px;
+  font-weight:600;
+}
+
+#chat {
+  flex:1;
+  padding:20px;
+  overflow:auto;
+}
+
+.msg {
+  max-width:720px;
+  margin-bottom:16px;
+  padding:14px;
+  border-radius:10px;
+}
+.user { background:#1e293b; align-self:flex-end; }
+.ai { background:#020617; border:1px solid #1e293b; }
+
+#inputBar {
+  padding:14px;
+  border-top:1px solid #1e293b;
+  display:flex;
+  gap:8px;
+}
+#inputBar input[type=file] { display:none; }
+#inputBar label {
+  background:#1e293b;
+  padding:8px 12px;
+  cursor:pointer;
+}
+#inputBar button {
+  padding:8px 14px;
+  background:#10b981;
+  border:none;
+  font-weight:600;
+  cursor:pointer;
+}
+#inputBar button:disabled {
+  opacity:0.6;
+  cursor:not-allowed;
+}
+
+.loading {
+  opacity:0.7;
+  font-style:italic;
+}
+</style>
+</head>
+
+<body>
+
+<aside>
+  <h3>Vision Assistant</h3>
+  <button onclick="location.href='/live'">▶ Live Vision</button>
+</aside>
+
+<main>
+<header>Image & Video Summary</header>
+
+<div id="chat"></div>
+
+<div id="inputBar">
+  <label>
+    📷 Image
+    <input type="file" id="img" accept="image/*">
+  </label>
+  <label>
+    🎞 Video
+    <input type="file" id="vid" accept="video/*">
+  </label>
+
+  <button id="sendImgBtn" onclick="sendImage()" disabled>Send Image</button>
+  <button id="sendVidBtn" onclick="sendVideo()" disabled>Send Video</button>
+</div>
+</main>
+
+<script>
+const chat = document.getElementById("chat");
+const imgInput = document.getElementById("img");
+const vidInput = document.getElementById("vid");
+
+const imgBtn = document.getElementById("sendImgBtn");
+const vidBtn = document.getElementById("sendVidBtn");
+
+let selectedImage = null;
+let selectedVideo = null;
+
+function addMsg(text, cls){
+  const d = document.createElement("div");
+  d.className = "msg " + cls;
+  d.innerText = text;
+  chat.appendChild(d);
+  chat.scrollTop = chat.scrollHeight;
+  return d;
+}
+
+/* ---------- FILE SELECTION ---------- */
+imgInput.onchange = () => {
+  selectedImage = imgInput.files[0] || null;
+  imgBtn.disabled = !selectedImage;
+  if(selectedImage){
+    addMsg(`📷 Image selected: ${selectedImage.name}`, "user");
+  }
+};
+
+vidInput.onchange = () => {
+  selectedVideo = vidInput.files[0] || null;
+  vidBtn.disabled = !selectedVideo;
+  if(selectedVideo){
+    addMsg(`🎞 Video selected: ${selectedVideo.name}`, "user");
+  }
+};
+
+/* ---------- IMAGE ---------- */
+async function sendImage(){
+  if(!selectedImage) return;
+
+  imgBtn.disabled = true;
+  vidBtn.disabled = true;
+
+  const loading = addMsg("Analyzing image…","ai loading");
+
+  const fd = new FormData();
+  fd.append("file", selectedImage);
+
+  try {
+    const r = await fetch("/image", { method: "POST", body: fd });
+    const j = await r.json();
+    loading.remove();
+    addMsg(j.summary, "ai");
+  } catch {
+    loading.innerText = "Failed to analyze image.";
+  }
+
+  imgInput.value = "";
+  selectedImage = null;
+}
+
+/* ---------- VIDEO ---------- */
+async function sendVideo(){
+  if(!selectedVideo) return;
+
+  imgBtn.disabled = true;
+  vidBtn.disabled = true;
+
+  const loading = addMsg("Processing video…","ai loading");
+
+  const fd = new FormData();
+  fd.append("file", selectedVideo);
+
+  try {
+    const r = await fetch("/video", { method: "POST", body: fd });
+    const j = await r.json();
+    loading.remove();
+    addMsg(j.summary, "ai");
+  } catch {
+    loading.innerText = "Failed to process video.";
+  }
+
+  vidInput.value = "";
+  selectedVideo = null;
+}
+</script>
+
+</body>
+</html>

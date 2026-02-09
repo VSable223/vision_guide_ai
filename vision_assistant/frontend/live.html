@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Live Vision</title>
+
+<style>
+body {
+  background:#020617;
+  color:#e5e7eb;
+  font-family:system-ui;
+  margin:0;
+  padding:20px;
+}
+video {
+  width:360px;
+  border:2px solid #10b981;
+  border-radius:8px;
+}
+.controls, .qa {
+  margin-top:12px;
+}
+button {
+  background:#10b981;
+  border:none;
+  padding:8px 12px;
+  font-weight:600;
+  cursor:pointer;
+  margin-right:6px;
+}
+button:disabled {
+  opacity:0.6;
+  cursor:not-allowed;
+}
+select {
+  padding:6px;
+}
+#scene, #qaBox {
+  margin-top:10px;
+  padding:10px;
+  border:1px solid #1e293b;
+}
+#listening {
+  margin-top:8px;
+  color:#facc15;
+  font-weight:600;
+  display:none;
+}
+</style>
+</head>
+
+<body>
+
+<h2>📹 Live Vision</h2>
+
+<video id="v" autoplay playsinline></video>
+<canvas id="c" hidden></canvas>
+
+<div id="scene">Waiting…</div>
+
+<div class="controls">
+  <button onclick="toggleNarration()">🔊 Toggle Narration</button>
+
+  <label style="margin-left:10px;">Live interval:</label>
+  <select onchange="changeInterval(this.value)">
+    <option value="1100">1100 ms (fast)</option>
+    <option value="1500">1500 ms</option>
+    <option value="2000">2000 ms</option>
+    <option value="3000" selected>3000 ms (recommended)</option>
+    <option value="4000">4000 ms (very stable)</option>
+  </select>
+</div>
+
+<div class="qa">
+  <input id="q" placeholder="Ask question">
+  <button id="askBtn" onclick="ask()">Ask</button>
+  <button id="voiceStartBtn" onclick="startVoice()">🎤 Start</button>
+  <button id="voiceStopBtn" onclick="stopVoice()" disabled>⏹ Stop</button>
+</div>
+
+<div id="listening">🎧 Listening…</div>
+<div id="qaBox"></div>
+
+<script>
+/* ---------- STATE ---------- */
+let narrationEnabled = true;
+let livePaused = false;
+let speakingNow = false;
+
+let intervalMs = 3000;
+let liveTimer = null;
+
+let recognition = null;
+
+/* ---------- ELEMENTS ---------- */
+const v = document.getElementById("v");
+const c = document.getElementById("c");
+const ctx = c.getContext("2d");
+const listeningEl = document.getElementById("listening");
+const scene = document.getElementById("scene");
+
+const askBtn = document.getElementById("askBtn");
+const voiceStartBtn = document.getElementById("voiceStartBtn");
+const voiceStopBtn = document.getElementById("voiceStopBtn");
+
+/* ---------- CAMERA ---------- */
+navigator.mediaDevices.getUserMedia({video:true})
+  .then(s => v.srcObject = s);
+
+/* ---------- FRAME CAPTURE ---------- */
+function snap(){
+  if(!v.videoWidth) return null;
+  c.width = 320;
+  c.height = 240;
+  ctx.drawImage(v,0,0,320,240);
+  return c.toDataURL("image/jpeg",0.6);
+}
+
+/* ---------- TTS ---------- */
+function speak(text){
+  if(!narrationEnabled || livePaused) return;
+
+  speechSynthesis.cancel();
+  speakingNow = true;
+
+  const u = new SpeechSynthesisUtterance(text);
+  u.onend = () => speakingNow = false;
+
+  speechSynthesis.speak(u);
+}
+
+/* ---------- TOGGLE NARRATION ---------- */
+function toggleNarration(){
+  narrationEnabled = !narrationEnabled;
+  speechSynthesis.cancel();
+  speakingNow = false;
+}
+
+/* ---------- LIVE LOOP ---------- */
+async function liveLoop(){
+  if(livePaused) return;
+
+  const img = snap();
+  if(!img) return;
+
+  const r = await fetch("/live_frame",{
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ image: img })
+  });
+
+  const j = await r.json();
+
+  if(j.scene){
+    scene.innerText = j.scene;
+    if(narrationEnabled && !speakingNow){
+      speak(j.scene);
+    }
+  }
+}
+
+/* ---------- INTERVAL CONTROL ---------- */
+function startLiveLoop(){
+  if(liveTimer) clearInterval(liveTimer);
+  liveTimer = setInterval(liveLoop, intervalMs);
+}
+
+function changeInterval(v){
+  intervalMs = parseInt(v);
+  startLiveLoop();
+}
+
+startLiveLoop();
+
+/* ---------- TEXT Q&A ---------- */
+async function ask(){
+  const q = document.getElementById("q").value.trim();
+  if(!q) return;
+
+  // disable only during request
+  askBtn.disabled = true;
+  voiceStartBtn.disabled = true;
+
+  livePaused = true;
+  speechSynthesis.cancel();
+
+  const img = snap();
+  if(!img){
+    qaBox.innerText = "Camera not ready.";
+    askBtn.disabled = false;
+    voiceStartBtn.disabled = false;
+    livePaused = false;
+    return;
+  }
+
+  try {
+    const r = await fetch("/live_question",{
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ image: img, question: q })
+    });
+
+    const ans = (await r.json()).answer;
+    qaBox.innerText = "Q: " + q + "\nA: " + ans;
+    speak(ans);
+  } catch {
+    qaBox.innerText = "Failed to get answer.";
+  }
+
+  document.getElementById("q").value = "";
+
+  // re-enable after answer
+  setTimeout(()=>{
+    livePaused = false;
+    askBtn.disabled = false;
+    voiceStartBtn.disabled = false;
+  }, 1500);
+}
+
+
+/* ---------- VOICE Q&A ---------- */
+function startVoice(){
+  livePaused = true;
+  speechSynthesis.cancel();
+
+  askBtn.disabled = true;
+  voiceStartBtn.disabled = true;
+  voiceStopBtn.disabled = false;
+
+  const R = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new R();
+  recognition.lang = "en-US";
+  recognition.continuous = true;
+
+  listeningEl.style.display = "block";
+
+  recognition.onresult = e => {
+    document.getElementById("q").value =
+      e.results[e.results.length - 1][0].transcript;
+  };
+
+  recognition.start();
+}
+
+function stopVoice(){
+  if(!recognition) return;
+
+  recognition.stop();
+  recognition = null;
+
+  listeningEl.style.display = "none";
+  voiceStopBtn.disabled = true;
+
+  // Re-enable Ask BEFORE sending
+  askBtn.disabled = false;
+  voiceStartBtn.disabled = false;
+
+  // Now send question
+  ask();
+}
+
+</script>
+
+</body>
+</html>
