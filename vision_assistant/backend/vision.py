@@ -47,11 +47,9 @@ def query_vlm(
         ]
     }
 
-    r = requests.post(LLAMA_URL, json=payload, timeout=60)
+    r = requests.post(LLAMA_URL, json=payload, timeout=60) 
     r.raise_for_status()
     text = r.json()["choices"][0]["message"]["content"].strip()
-
-
     return text
 
 
